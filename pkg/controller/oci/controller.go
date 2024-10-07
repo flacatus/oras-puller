@@ -45,7 +45,6 @@ func (c *Controller) ProcessRepositories(repositories []string) []error {
 			defer wg.Done()
 
 			sem <- struct{}{}
-			// Release semaphore when done
 			defer func() { <-sem }()
 
 			if err := c.processRepository(repo); err != nil {
@@ -71,12 +70,12 @@ func (c *Controller) ProcessRepositories(repositories []string) []error {
 func (c *Controller) processRepository(repo string) error {
 	tags, err := c.FetchTags(repo)
 	if err != nil {
-		return fmt.Errorf("failed to fetch tags for repository %s: %w", repo, err) // Return specific error
+		return fmt.Errorf("failed to fetch tags for repository %s: %w", repo, err)
 	}
 
 	for _, tagInfo := range tags {
 		if err := c.ProcessTag(repo, tagInfo.Name, tagInfo.LastModified); err != nil {
-			return fmt.Errorf("failed to process tag %s in repository %s: %w", tagInfo.Name, repo, err) // Return specific error
+			return fmt.Errorf("failed to process tag %s in repository %s: %w", tagInfo.Name, repo, err)
 		}
 	}
 

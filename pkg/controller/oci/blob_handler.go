@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-// Configurable timeouts
 const (
 	extractTimeout = 1 * time.Minute
 )
@@ -110,7 +109,6 @@ func (c *Controller) processBlob(blobPath, outputDir string) error {
 	}
 	defer file.Close()
 
-	// Determine if the blob is a tar.gz file
 	if isTarGzBlob(blobPath, file) {
 		return c.extractBlob(blobPath, file, outputDir)
 	}

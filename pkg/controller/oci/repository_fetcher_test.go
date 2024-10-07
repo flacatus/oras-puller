@@ -44,7 +44,7 @@ func TestFetchTags(t *testing.T) {
 			repo: "error-repo",
 			mockResponse: &http.Response{
 				StatusCode: http.StatusNotFound,
-				Body:       io.NopCloser(bytes.NewBuffer([]byte(""))), // use NopCloser for empty body
+				Body:       io.NopCloser(bytes.NewBuffer([]byte(""))),
 			},
 			expectedError: "failed to fetch tags: 404 Not Found",
 		},

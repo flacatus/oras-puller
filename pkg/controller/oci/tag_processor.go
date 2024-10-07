@@ -20,20 +20,16 @@ import (
 // Constants for configurable settings
 const (
 	blobTimeout      = 2 * time.Minute
-	outputBaseDir    = "./output-dir"
-	blobDir          = "/tmp/oci-layout-root-5/blobs/sha256/"
 	tagDaysThreshold = 1
 )
 
 // Processes individual tags from a given repository
 func (c *Controller) ProcessTag(repo, tag, creationDate string) error {
-	log.Printf("Processing tag %s from repo %s\n", tag, repo)
-
 	if err := c.validateCreationDate(creationDate); err != nil {
 		return err
 	}
 
-	store, err := oci.New("/tmp/oci-layout-root-5")
+	store, err := oci.New(c.OCIStorePath)
 	if err != nil {
 		return fmt.Errorf("failed to create OCI store: %w", err)
 	}
@@ -66,7 +62,6 @@ func (c *Controller) validateCreationDate(creationDate string) error {
 	}
 
 	if time.Since(parsedDate) > time.Duration(tagDaysThreshold)*24*time.Hour {
-		log.Printf("Skipping tag (older than %d days): %s", tagDaysThreshold, creationDate)
 		return nil
 	}
 
@@ -104,8 +99,8 @@ func (c *Controller) copyTagManifest(ctx context.Context, repoRemote *remote.Rep
 
 // Creates the output directory for the blobs
 func (c *Controller) createOutputDirectory(repo, creationDate, tag string) string {
-	parsedDate, _ := time.Parse(time.RFC1123, creationDate) // Ignoring error, as it should have been validated already
-	return filepath.Join(outputBaseDir, repo, parsedDate.Format("2006-01-02"), tag)
+	parsedDate, _ := time.Parse(time.RFC1123, creationDate)
+	return filepath.Join(c.OutputDir, repo, parsedDate.Format("2006-01-02"), tag)
 }
 
 // Processes the blobs by handling individual blob files
@@ -114,7 +109,7 @@ func (c *Controller) processBlobs(outputDir string) error {
 	errors := make(chan error, 10)
 	sem := make(chan struct{}, 10)
 
-	entries, err := os.ReadDir(blobDir)
+	entries, err := os.ReadDir(c.BlobDir)
 	if err != nil {
 		return fmt.Errorf("failed to read blob directory: %w", err)
 	}
@@ -124,7 +119,7 @@ func (c *Controller) processBlobs(outputDir string) error {
 			continue
 		}
 		wg.Add(1)
-		go c.HandleBlob(filepath.Join(blobDir, entry.Name()), outputDir, &wg, errors, sem)
+		go c.HandleBlob(filepath.Join(c.BlobDir, entry.Name()), outputDir, &wg, errors, sem)
 	}
 
 	wg.Wait()

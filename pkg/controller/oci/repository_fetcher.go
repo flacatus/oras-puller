@@ -43,7 +43,7 @@ func (c *Controller) FetchTags(repo string) ([]TagInfo, error) {
 		}
 
 		if len(response.Tags) == 0 {
-			break // No more tags to fetch
+			break
 		}
 
 		tags = append(tags, response.Tags...)

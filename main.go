@@ -7,11 +7,10 @@ import (
 )
 
 func main() {
-	// Setup logging
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
 	// Initialize the controller
-	controller := oci.NewController("./output-dir", "/tmp/oci-layout-root-5")
+	controller := oci.NewController("/home/flacatus/WORKSPACE/qe/oras-sdk/out", "/home/flacatus/WORKSPACE/qe/oras-sdk/blobs")
 
 	repositories := []string{
 		"konflux-test-storage/konflux-team/integration-service",
@@ -26,7 +25,6 @@ func main() {
 	for _, repo := range repositories {
 		log.Println("Processing repository:", repo)
 
-		// Process the repository and gather errors
 		errors := controller.ProcessRepositories([]string{repo})
 		allErrors = append(allErrors, errors...)
 	}
