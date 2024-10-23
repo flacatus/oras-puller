@@ -20,18 +20,14 @@ import (
 // Constants for configurable settings
 const (
 	blobTimeout      = 2 * time.Minute
-	tagDaysThreshold = 1
+	tagDaysThreshold = 4
 )
 
 // Processes individual tags from a given repository
 func (c *Controller) ProcessTag(repo, tag, creationDate string) error {
+
 	if err := c.validateCreationDate(creationDate); err != nil {
 		return err
-	}
-
-	store, err := oci.New(c.OCIStorePath)
-	if err != nil {
-		return fmt.Errorf("failed to create OCI store: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), blobTimeout)
@@ -42,7 +38,7 @@ func (c *Controller) ProcessTag(repo, tag, creationDate string) error {
 		return err
 	}
 
-	if err := c.copyTagManifest(ctx, repoRemote, tag, store); err != nil {
+	if err := c.copyTagManifest(ctx, repoRemote, tag, c.Store); err != nil {
 		return err
 	}
 

@@ -1,43 +1,84 @@
 package oci
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
+
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content/oci"
 )
 
-// Controller orchestrates operations on repositories.
-// It holds the configuration for output directories.
+// Controller orchestrates operations on OCI repositories.
+// It holds the configuration for output and blob directories.
 type Controller struct {
-	// Directory to store output files
+	// OutputDir is the directory where output files are stored.
 	OutputDir string
 
-	// Directory where blob files are stored
+	// BlobDir is the directory where blob files are stored.
 	BlobDir string
 
-	// Path to the OCI store
+	// OCIStorePath is the path to the local OCI store.
 	OCIStorePath string
+
+	// Store is the OCI store instance.
+	Store *oci.Store
 }
 
-// NewController initializes a new Controller instance with the specified output and blob directories.
-func NewController(outputDir string, OCIStorePath string) *Controller {
+// NewController initializes a new Controller instance with the specified output and OCI store path.
+func NewController(outputDir string, OCIStorePath string) (*Controller, error) {
+	store, err := oci.New(OCIStorePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize OCI store at path %s: %w", OCIStorePath, err)
+	}
+
 	return &Controller{
 		OutputDir:    outputDir,
 		BlobDir:      OCIStorePath + "/blobs/sha256/",
 		OCIStorePath: OCIStorePath,
-	}
+		Store:        store,
+	}, nil
 }
 
-// ProcessRepositories orchestrates the processing of multiple repositories concurrently.
-// It fetches tags for each repository and processes them.
-// Returns a slice of encountered errors during processing.
+// FetchOCIContainerAnnotations fetches the OCI container annotations for a given repository and tag.
+// It retrieves the descriptor content by copying the tag manifest to the OCI store and unmarshaling it into a Descriptor struct.
+func (c *Controller) FetchOCIContainerAnnotations(repo, tag string) (*v1.Descriptor, error) {
+	ctx := context.Background()
+
+	repoRemote, err := c.setupRemoteRepository(repo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set up remote repository for %s: %w", repo, err)
+	}
+
+	if err := c.copyTagManifest(ctx, repoRemote, tag, c.Store); err != nil {
+		return nil, fmt.Errorf("failed to copy manifest for tag %s: %w", tag, err)
+	}
+
+	_, descriptorBytes, err := oras.FetchBytes(ctx, c.Store, tag, oras.FetchBytesOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch descriptor bytes for tag %s: %w", tag, err)
+	}
+
+	var descriptor v1.Descriptor
+	if err := json.Unmarshal(descriptorBytes, &descriptor); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal descriptor content: %w", err)
+	}
+
+	return &descriptor, nil
+}
+
+// ProcessRepositories processes multiple repositories concurrently.
+// It fetches and processes tags for each repository, limiting concurrency to avoid overwhelming system resources.
+// Returns a slice of errors encountered during the processing of repositories.
 func (c *Controller) ProcessRepositories(repositories []string) []error {
 	var wg sync.WaitGroup
-	// Buffered channel to collect errors
 	errorsChan := make(chan error, len(repositories))
 
-	// Semaphore to control concurrency
 	sem := make(chan struct{}, 10)
 
+	// Loop over each repository and process it concurrently.
 	for _, repo := range repositories {
 		wg.Add(1)
 
@@ -48,7 +89,7 @@ func (c *Controller) ProcessRepositories(repositories []string) []error {
 			defer func() { <-sem }()
 
 			if err := c.processRepository(repo); err != nil {
-				errorsChan <- err
+				errorsChan <- fmt.Errorf("repository %s: %w", repo, err)
 			}
 		}(repo)
 	}
@@ -64,15 +105,16 @@ func (c *Controller) ProcessRepositories(repositories []string) []error {
 	return errors
 }
 
-// processRepository fetches tags for a repository and processes each tag.
-// Returns an error if any occurs during fetching or processing.
-// If successful, it returns nil, indicating no errors were encountered.
+// processRepository fetches and processes tags for a specific repository.
+// It returns an error if any issues occur while fetching or processing tags.
 func (c *Controller) processRepository(repo string) error {
+	// Fetch tags for the specified repository.
 	tags, err := c.FetchTags(repo)
 	if err != nil {
 		return fmt.Errorf("failed to fetch tags for repository %s: %w", repo, err)
 	}
 
+	// Process each tag within the repository.
 	for _, tagInfo := range tags {
 		if err := c.ProcessTag(repo, tagInfo.Name, tagInfo.LastModified); err != nil {
 			return fmt.Errorf("failed to process tag %s in repository %s: %w", tagInfo.Name, repo, err)
