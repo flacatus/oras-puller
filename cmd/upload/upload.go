@@ -5,7 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
+	"github.com/flacatus/oras-puller/pkg/controller/oci"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/cobra"
 	"oras.land/oras-go/v2"
@@ -59,16 +64,42 @@ Examples:
 			return fmt.Errorf("destination must be specified using --dest flag")
 		}
 
-		packOpts := oras.PackManifestOptions{
-			ManifestAnnotations: map[string]string{"$config": ""},
-		}
-		fmt.Println(packOpts)
 		store, err := file.New("")
 		if err != nil {
 			return err
 		}
 		defer store.Close()
 		memoryStore := memory.New()
+		ociController, err := oci.NewController("./test", "./test-cache")
+
+		repoz, tagz, err := parseRepoAndTag("quay.io/konflux-test-storage/konflux-team/e2e-tests:konflux-e2e-fdv6k")
+		if err != nil {
+			return err
+		}
+
+		// Call ProcessTag to get details of the tag (implement as needed)
+		if err := ociController.ProcessTag(repoz, tagz, time.Now().Format(time.RFC1123)); err != nil {
+			return fmt.Errorf("failed to fetch tag: %v", err)
+		}
+
+		// Find the deepest directory containing files
+		deepestDir, _ := findDirWithFiles("./test")
+		fmt.Println(deepestDir)
+		pula = append(pula, deepestDir)
+
+		if deepestDir != "" {
+			fmt.Printf("Deepest directory with files: %s\n", deepestDir)
+		} else {
+			fmt.Println("No directories with files found.")
+		}
+
+		ann, _ := ociController.FetchOCIContainerAnnotations(repoz, tagz)
+
+		fmt.Println(ann.Annotations)
+
+		packOpts := oras.PackManifestOptions{
+			ManifestAnnotations: ann.Annotations,
+		}
 
 		descs, err := loadFiles(context.Background(), store, make(map[string]map[string]string), pula)
 
@@ -106,7 +137,7 @@ Examples:
 			Cache:      auth.NewCache(),
 			Credential: credentials.Credential(credStore),
 		}
-		_, err = oras.Copy(context.Background(), union, root.Digest.String(), repo, "konflux-e2e-vtmbk", oras.DefaultCopyOptions)
+		_, err = oras.Copy(context.Background(), union, root.Digest.String(), repo, "konflux-e2e-fdv6k", oras.DefaultCopyOptions)
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -177,4 +208,62 @@ func (m *multiReadOnlyTarget) Fetch(ctx context.Context, target ocispec.Descript
 		lastErr = err
 	}
 	return nil, lastErr
+}
+
+// parseRepoAndTag extracts the repository and tag from the given repo flag.
+func parseRepoAndTag(repoFlag string) (string, string, error) {
+	// Ensure the repoFlag starts with 'quay.io/'
+	if !strings.HasPrefix(repoFlag, "quay.io/") {
+		return "", "", fmt.Errorf("the repository must start with 'quay.io/'")
+	}
+
+	// Remove 'quay.io/' prefix and split the repo and tag using the ':' character
+	repoFlag = strings.TrimPrefix(repoFlag, "quay.io/")
+	parts := strings.SplitN(repoFlag, ":", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("tag is missing in the repo flag")
+	}
+
+	return parts[0], parts[1], nil
+}
+
+// Function to check if a directory contains files
+func containsFiles(path string) bool {
+	files, err := os.ReadDir(path)
+	if err != nil {
+		return false
+	}
+	for _, file := range files {
+		if !file.IsDir() {
+			// Return true if any file is found in the directory
+			return true
+		}
+	}
+	// Return false if no files are found
+	return false
+}
+
+// Function to recursively find the first directory with files and stop further traversal
+func findDirWithFiles(root string) (string, error) {
+	var dirWithFiles string
+
+	// Walk function to process each directory and file
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// Only check directories
+		if info.IsDir() {
+			// Check if the directory contains files
+			if containsFiles(path) {
+				// If it contains files, set this as the directory and stop further recursion
+				dirWithFiles = path
+				return filepath.SkipDir
+			}
+		}
+		return nil
+	})
+
+	// Return the directory and any errors encountered
+	return dirWithFiles, err
 }
